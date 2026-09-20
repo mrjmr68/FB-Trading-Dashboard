@@ -1,9 +1,23 @@
 // Cloudflare Worker: keep OPENAI_API_KEY as an encrypted Worker secret.
-const ALLOWED_ORIGIN='*'; // Restrict to the final GitHub Pages origin after publishing.
-const cors={'access-control-allow-origin':ALLOWED_ORIGIN,'access-control-allow-methods':'POST, OPTIONS','access-control-allow-headers':'content-type','content-type':'application/json'};
+const ALLOWED_ORIGIN='https://mrjmr68.github.io';
+const cors={'access-control-allow-origin':ALLOWED_ORIGIN,'access-control-allow-methods':'GET, POST, OPTIONS','access-control-allow-headers':'content-type, authorization','content-type':'application/json','vary':'origin'};
 export default{async fetch(request,env){
+ const origin=request.headers.get('origin');
+ if(origin&&origin!==ALLOWED_ORIGIN)return json({error:'Origin not allowed.'},403);
  if(request.method==='OPTIONS')return new Response(null,{headers:cors});
+ const url=new URL(request.url);
+ if(url.pathname.endsWith('/kalshi')){
+  if(request.method!=='GET')return json({error:'Use GET for Kalshi odds.'},405);
+  const upstream=await fetch('https://external-api.kalshi.com/trade-api/v2/events?series_ticker=KXNFLGAME&status=open&limit=200&with_nested_markets=true',{headers:{accept:'application/json'}});
+  const data=await upstream.json().catch(()=>({}));
+  if(!upstream.ok)return json({error:data.message||'Kalshi market data is unavailable.'},upstream.status);
+  const pairs=['PHITEN','PITNE','MINCHI','CARATL','GBNYJ','NOBAL','CINHOU','CLETB'];
+  const events=(data.events||[]).filter(event=>pairs.some(pair=>event.event_ticker?.includes(pair)));
+  return json({events,as_of:new Date().toISOString()});
+ }
  if(request.method!=='POST')return json({error:'Use POST.'},405);
+ if(!env.DASHBOARD_TOKEN)return json({error:'DASHBOARD_TOKEN is not configured.'},500);
+ if(request.headers.get('authorization')!==`Bearer ${env.DASHBOARD_TOKEN}`)return json({error:'Unauthorized.'},401);
  if(!env.OPENAI_API_KEY)return json({error:'OPENAI_API_KEY is not configured.'},500);
  let body;try{body=await request.json()}catch{return json({error:'Invalid JSON.'},400)}
  if(!Array.isArray(body.games)||body.games.length>16)return json({error:'Expected a games array.'},400);
